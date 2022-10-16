@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"net/http"
 	"strings"
 	"time"
 
@@ -11,6 +14,7 @@ import (
 	discardMetrics "github.com/go-kit/kit/metrics/discard"
 	expvarMetrics "github.com/go-kit/kit/metrics/expvar"
 	kitinflux "github.com/go-kit/kit/metrics/influx"
+	prometheusMetrics "github.com/go-kit/kit/metrics/prometheus"
 	influx "github.com/influxdata/influxdb1-client/v2"
 	"github.com/itzg/mc-router/server"
 	"github.com/sirupsen/logrus"
@@ -27,6 +31,8 @@ func NewMetricsBuilder(backend string, config *MetricsBackendConfig) MetricsBuil
 		return &expvarMetricsBuilder{}
 	case "influxdb":
 		return &influxMetricsBuilder{config: config}
+	case "prometheus":
+		return &prometheusMetricBuilder{config: config}
 	default:
 		return &discardMetricsBuilder{}
 	}
@@ -110,5 +116,58 @@ func (b *influxMetricsBuilder) BuildConnectorMetrics() *server.ConnectorMetrics 
 		BytesTransmitted:  metrics.NewCounter("mc_router_transmitted_bytes"),
 		Connections:       metrics.NewCounter("mc_router_connections"),
 		ActiveConnections: metrics.NewGauge("mc_router_connections_active"),
+	}
+}
+
+type prometheusMetricBuilder struct {
+	config *MetricsBackendConfig
+}
+
+func (b *prometheusMetricBuilder) Start(ctx context.Context) error {
+	promConfig := &b.config.Prometheus
+
+	if promConfig.Port <= 0 {
+		return errors.New("promConfig port can,t be zero")
+	}
+
+
+	host := fmt.Sprintf("%s:%d",promConfig.Host,promConfig.Port)
+	logrus.Debug("Start Prometheus Exporter at "+ host)
+	http.Handle("/metrics", promhttp.Handler())
+	http.ListenAndServe(host, nil)
+
+	return nil
+}
+func (b *prometheusMetricBuilder) BuildConnectorMetrics() *server.ConnectorMetrics {
+	logrus.Debug("BuildConnectorMetrics prometheusMetricBuilder")
+	return &server.ConnectorMetrics{
+		Errors: prometheusMetrics.NewCounterFrom(
+				prometheus.CounterOpts{
+					Name: "mc_router_errors",
+					Help: "The number of errors",
+				},
+				[]string{"type"},
+		),
+		BytesTransmitted: prometheusMetrics.NewCounterFrom(
+				prometheus.CounterOpts{
+					Name: "mc_router_transmitted_bytes",
+					Help: "The total amount of transmitted bytes",
+				},
+				[]string{},
+		),
+		Connections: prometheusMetrics.NewCounterFrom(
+				prometheus.CounterOpts{
+					Name: "mc_router_connections",
+					Help: "The total number of connetions",
+				},
+				[]string{"side","host"},
+		),
+		ActiveConnections: prometheusMetrics.NewGaugeFrom(
+				prometheus.GaugeOpts{
+					Name: "mc_router_connections_active",
+					Help: "The current number of active connections",
+				},
+				[]string{},
+				),
 	}
 }

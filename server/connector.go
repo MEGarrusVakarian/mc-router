@@ -100,7 +100,7 @@ func (c *Connector) acceptConnections(ctx context.Context, ln net.Listener, conn
 }
 
 func (c *Connector) HandleConnection(ctx context.Context, frontendConn net.Conn) {
-	c.metrics.Connections.With("side", "frontend").Add(1)
+	c.metrics.Connections.With("side", "frontend","host","").Add(1)
 	//noinspection GoUnhandledErrorResult
 	defer frontendConn.Close()
 
